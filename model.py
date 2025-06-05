@@ -1,8 +1,11 @@
+import math
+
 from torch import nn
+import torch.nn.functional as F
 import torch
 
 
-class RotaryEmbedding(nn.Module):
+class RotaryPositionalEmbedding(nn.Module):
     def __init__(self, d_rope, device='cpu'):
         """creating relative positional embedding using RoPE
 
@@ -17,12 +20,21 @@ class RotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", inv_freq)
         self.scale = 40
 
-    def forward(self, seq_len):
+    def forward(self, k, q):
+        batch_size, seq_len, _ = k.shape
         # get positions or times
         t = torch.arange(seq_len, device=self.inv_freq.device).type_as(self.inv_freq) / self.scale
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)   # (seq_len, d_rope // 2)
         # double the length (repeat freq matrix)
-        return torch.cat((freqs, freqs), dim=-1)    # (seq_len, d_rope)
+        rotation = torch.cat((freqs, freqs), dim=-1)    # (seq_len, d_rope)
+        cos = torch.cos(rotation).view(1, seq_len, 1, -1)  # [1, seq, 1, dim]
+        sin = torch.sin(rotation).view(1, seq_len, 1, -1)
+        # apply rotations on keys and queries
+        k_rotary = apply_rotary(k, cos, sin)
+        q_rotary = apply_rotary(q, cos, sin)
+        return k_rotary, q_rotary
+
+
 
 def rotate_half(x):
     x1, x2 = x.chunk(2, dim=-1)
@@ -43,7 +55,7 @@ def apply_rotary(x, cos, sin):
 class MLA(nn.Module):
     def __init__(self, h_dim, n_heads, compression_dim):
         super(MLA, self).__init__()
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         # model size related parameters
         self.n_heads = n_heads
         self.compression_dim = compression_dim
@@ -63,7 +75,7 @@ class MLA(nn.Module):
         self.W_qr = nn.Linear(self.compression_dim, self.n_heads * self.d_rope, bias=False)
 
         # RoPE
-        rope = RotaryEmbedding(self.d_rope, self.device)
+        self.RoPE = RotaryPositionalEmbedding(self.d_rope, self.device)
 
         # final projection to match attention output dimension
         self.out_proj = nn.Linear(self.n_heads * self.d_head, h_dim, bias=False)
@@ -79,10 +91,25 @@ class MLA(nn.Module):
         # compute up_projections
         q_c = self.W_uq(c_q)
         k_c = self.W_uk(c_kv)
-        v_c = self.W_uv(c_kv)
+        v = self.W_uv(c_kv)
 
         # compute decoupled keys and queries
         k_r = self.W_kr(x)
         q_r = self.W_qr(q_c)
 
-        # todo: here comes: RoPE -> attention -> final out projection
+        # compute rotary positional embeddings (RoPE)
+        k_rope, q_rope = self.RoPE(k_r, q_r)
+
+        # combine to get keys and queries
+        k = torch.cat([k_c, k_rope], dim=-1)
+        q = torch.cat([q_c, q_rope], dim=-1)
+
+        # calculate attention
+        attn_scores = torch.einsum("bqhd, bkhd->bhqk", k, q) / math.sqrt(self.d_head)
+        attn_weights = F.softmax(attn_scores, dim=-1)
+        out = torch.einsum("bhqk,bkhd->bqhd", attn_scores, v)
+
+        # reassemble the heads and project to the dimension of input x
+        output = self.out_proj(out.contiguous().view(batch_size, seq_len, -1))
+
+        return output, (c_kv, k_rope)
