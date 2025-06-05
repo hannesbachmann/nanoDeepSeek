@@ -1,11 +1,49 @@
 from torch import nn
+import torch
 
 
+class RotaryEmbedding(nn.Module):
+    def __init__(self, d_rope, device='cpu'):
+        """creating relative positional embedding using RoPE
+
+        :param d_rope: dimension of the rotary embedding (maybe chose d_head // 2 as in deepseek-v2)
+        """
+        super().__init__()
+        assert d_rope % 2 == 0, "Dimension must be even for rotary embeddings"
+        self.d_rope = d_rope
+        half_dim = self.d_rope // 2
+        # calculate the angles
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, half_dim, 2, device=device).float() / half_dim))
+        self.register_buffer("inv_freq", inv_freq)
+        self.scale = 40
+
+    def forward(self, seq_len):
+        # get positions or times
+        t = torch.arange(seq_len, device=self.inv_freq.device).type_as(self.inv_freq) / self.scale
+        freqs = torch.einsum("i,j->ij", t, self.inv_freq)   # (seq_len, d_rope // 2)
+        # double the length (repeat freq matrix)
+        return torch.cat((freqs, freqs), dim=-1)    # (seq_len, d_rope)
+
+def rotate_half(x):
+    x1, x2 = x.chunk(2, dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
+
+def apply_rotary(x, cos, sin):
+    """
+    Apply rotary embeddings to the first half of x.
+    """
+    # Split x into two parts: one for rotary embeddings and the other untouched
+    x_rot, x_base = x.split(cos.shape[-1], dim=-1)
+    # Apply rotary embeddings to the rotary part
+    x_rot = (x_rot * cos) + (rotate_half(x_rot) * sin)
+    # Concatenate the rotary-applied and base parts
+    return torch.cat([x_rot, x_base], dim=-1)
 
 
 class MLA(nn.Module):
     def __init__(self, h_dim, n_heads, compression_dim):
         super(MLA, self).__init__()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         # model size related parameters
         self.n_heads = n_heads
         self.compression_dim = compression_dim
@@ -23,6 +61,9 @@ class MLA(nn.Module):
         # projections to produce decoupled keys and queries
         self.W_kr = nn.Linear(self.h_dim, self.n_heads * self.d_rope, bias=False)
         self.W_qr = nn.Linear(self.compression_dim, self.n_heads * self.d_rope, bias=False)
+
+        # RoPE
+        rope = RotaryEmbedding(self.d_rope, self.device)
 
         # final projection to match attention output dimension
         self.out_proj = nn.Linear(self.n_heads * self.d_head, h_dim, bias=False)
