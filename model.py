@@ -1,8 +1,62 @@
 import math
-
 from torch import nn
 import torch.nn.functional as F
 import torch
+
+
+class ExpertBlock(nn.Module):
+    def __init__(self, h_dim, e_dim):
+        super(ExpertBlock, self).__init__()
+        # very small expert (as in deepseek MoE)
+        self.h_dim = h_dim
+        self.e_dim = e_dim
+        self.up = nn.Linear(self.h_dim, self.e_dim, bias=False)
+        self.down = nn.Linear(self.e_dim, self.h_dim, bias=False)
+
+    def forward(self, x):
+        up_c = self.up(x)
+        out_c = self.down(F.gelu(up_c))
+        return out_c
+
+class TransformerBlock(nn.Module):
+    def __init__(self, h_dim, e_dim):
+        super(TransformerBlock, self).__init__()
+        # MLA and deepseek MoE
+        self.h_dim = h_dim
+        self.e_dim = e_dim
+
+
+class MoE(nn.Module):
+    def __init__(self, h_dim, e_dim, n_shared, n_routed, k):
+        """finegrained expert segmentation and shared expert isolation (as in deepseek Moe)
+
+        :param h_dim: model hidden dimension
+        :param e_dim: expert hidden dimension
+        :param n_shared: number of shared experts
+        :param n_routed: number of routed experts
+        :param k: number of activated routed experts    (top-k activation)
+        """
+        super(MoE, self).__init__()
+        self.h_dim = h_dim
+        self.e_dim = e_dim
+        self.n_shared = n_shared
+        self.n_routed = n_routed
+        self.k = k
+        # use only a few (1-2) shared experts and a lot of routed experts
+        self.shared_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_shared)])
+        self.routed_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_routed)])
+
+        # routing network
+        self.router = nn.Linear(self.h_dim, n_routed, bias=False)
+
+    def forward(self, x):
+        # compute output for shared experts (always active)
+        shared = sum(expert(x) for expert in self.shared_experts)
+        # routing to get the top-k active routed experts
+        router_out = self.router(x)
+        all_prob = F.softmax(router_out, dim=-1)
+        top_k_prob, top_k_idx = torch.topk(all_prob, k=self.k)
+
 
 
 class RotaryPositionalEmbedding(nn.Module):
