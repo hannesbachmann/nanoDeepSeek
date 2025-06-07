@@ -1,7 +1,31 @@
 import math
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.functional import dropout
+from torch.utils.checkpoint import checkpoint
 import torch
+
+
+class NanoDeepSeek(nn.Module):
+    def __init__(self, h_dim, e_dim, compression_dim, n_layers, n_heads, n_tokens, n_shared=1, n_routed=10, k=3):
+        super(NanoDeepSeek, self).__init__()
+        self.deepseek_model = nn.ModuleDict(dict(
+            token_emb=nn.Embedding(n_tokens, h_dim),
+            transformer_blocks=nn.ModuleList(
+                [TransformerBlock(h_dim, e_dim, n_heads, compression_dim, n_shared, n_routed, k) for _ in
+                 range(n_layers)]),
+            norm=nn.LayerNorm(h_dim),
+            proj_head=nn.Linear(h_dim, n_tokens, bias=False)
+        ))
+
+    def forward(self, x):
+        x = self.deepseek_model.token_emb(x)
+
+        for block in self.deepseek_model.transformer_blocks:
+            x, c_kv = block(x)
+        x = self.deepseek_model.norm(x)
+
+        return self.deepseek_model.proj_head(x)
 
 
 class ExpertBlock(nn.Module):
@@ -18,12 +42,31 @@ class ExpertBlock(nn.Module):
         out_c = self.down(F.gelu(up_c))
         return out_c
 
+
 class TransformerBlock(nn.Module):
-    def __init__(self, h_dim, e_dim):
+    def __init__(self, h_dim, e_dim, n_heads, compression_dim, n_shared=1, n_routed=10, k=3):
         super(TransformerBlock, self).__init__()
         # MLA and deepseek MoE
         self.h_dim = h_dim
         self.e_dim = e_dim
+        self.norm1 = nn.LayerNorm(h_dim)
+        self.attn = MLA(h_dim, n_heads, compression_dim)
+        self.norm2 = nn.LayerNorm(h_dim)
+        self.moe = MoE(h_dim, e_dim, n_shared, n_routed, k)
+        self.dropout = nn.Dropout(0.2)
+
+    def forward(self, x, prev_kv=None):
+        # can use previous key, value during inference
+        # MLA with layer norm and residual connection
+        attn, c_kv = checkpoint(self.attn, self.norm1(x), prev_kv)
+        attn = attn + x
+        # MoE with layer norm and residual connection
+        moe = checkpoint(self.moe, self.norm2(attn))
+        moe = moe + x
+
+        out = self.dropout(moe)
+
+        return out, c_kv
 
 
 class MoE(nn.Module):
@@ -38,7 +81,8 @@ class MoE(nn.Module):
         """
         super(MoE, self).__init__()
         self.h_dim = h_dim
-        self.e_dim = e_dim
+        # self.e_dim = e_dim
+        self.e_dim = h_dim * 4  # GPT2 transformer MLP inspired up-down-projection
         self.n_shared = n_shared
         self.n_routed = n_routed
         self.k = k
@@ -51,12 +95,25 @@ class MoE(nn.Module):
 
     def forward(self, x):
         # compute output for shared experts (always active)
-        shared = sum(expert(x) for expert in self.shared_experts)
-        # routing to get the top-k active routed experts
+        shared_out = sum(expert(x) for expert in self.shared_experts)
+        # routing to get the top-k active routed experts with their contribution
         router_out = self.router(x)
         all_prob = F.softmax(router_out, dim=-1)
         top_k_prob, top_k_idx = torch.topk(all_prob, k=self.k)
 
+        routed_out = torch.zeros_like(x)
+        for k in range(self.k):
+            expert_mask = top_k_idx[..., k]
+            expert_contrib = torch.zeros_like(x)
+
+            for expert_idx in range(self.n_routed):
+                mask = (expert_mask == expert_idx)
+                if mask.any():
+                    expert_out = self.routed_experts[expert_idx](x[mask])
+                    expert_contrib[mask] = expert_out * top_k_prob[..., k][mask].unsqueeze(-1)
+
+            routed_out += expert_contrib
+        return shared_out + routed_out + x
 
 
 class RotaryPositionalEmbedding(nn.Module):
@@ -78,9 +135,9 @@ class RotaryPositionalEmbedding(nn.Module):
         batch_size, seq_len, _ = k.shape
         # get positions or times
         t = torch.arange(seq_len, device=self.inv_freq.device).type_as(self.inv_freq) / self.scale
-        freqs = torch.einsum("i,j->ij", t, self.inv_freq)   # (seq_len, d_rope // 2)
+        freqs = torch.einsum("i,j->ij", t, self.inv_freq)  # (seq_len, d_rope // 2)
         # double the length (repeat freq matrix)
-        rotation = torch.cat((freqs, freqs), dim=-1)    # (seq_len, d_rope)
+        rotation = torch.cat((freqs, freqs), dim=-1)  # (seq_len, d_rope)
         cos = torch.cos(rotation).view(1, seq_len, 1, -1)  # [1, seq, 1, dim]
         sin = torch.sin(rotation).view(1, seq_len, 1, -1)
         # apply rotations on keys and queries
@@ -89,10 +146,10 @@ class RotaryPositionalEmbedding(nn.Module):
         return k_rotary, q_rotary
 
 
-
 def rotate_half(x):
     x1, x2 = x.chunk(2, dim=-1)
     return torch.cat((-x2, x1), dim=-1)
+
 
 def apply_rotary(x, cos, sin):
     """
@@ -114,7 +171,7 @@ class MLA(nn.Module):
         self.n_heads = n_heads
         self.compression_dim = compression_dim
         self.d_head = h_dim // self.n_heads
-        self.d_rope = self.d_head // 2      # as chosen in deepseek-v2
+        self.d_rope = self.d_head // 2  # as chosen in deepseek-v2
         self.up_proj_dim = (self.d_heads - self.d_rope) * self.n_heads  # for keys and queries
 
         # define all down- and up-projections
@@ -134,7 +191,7 @@ class MLA(nn.Module):
         # final projection to match attention output dimension
         self.out_proj = nn.Linear(self.n_heads * self.d_head, h_dim, bias=False)
 
-    def forward(self, x):
+    def forward(self, x, prev_kv=None):
         # create all down-projection latents
         batch_size, seq_len, h_dim = x.shape
 
