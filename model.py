@@ -1,7 +1,6 @@
 import math
 from torch import nn
 import torch.nn.functional as F
-from torch.nn.functional import dropout
 from torch.utils.checkpoint import checkpoint
 import torch
 
@@ -19,6 +18,7 @@ class NanoDeepSeek(nn.Module):
         ))
 
     def forward(self, x):
+        # x: (B, S) -> (B, S, D)
         x = self.deepseek_model.token_emb(x)
 
         for block in self.deepseek_model.transformer_blocks:
@@ -132,7 +132,8 @@ class RotaryPositionalEmbedding(nn.Module):
         self.scale = 40
 
     def forward(self, k, q):
-        batch_size, seq_len, _ = k.shape
+        # q: (B, S, d_rope*n_heads)
+        batch_size, seq_len, n_heads, d_rope = q.shape
         # get positions or times
         t = torch.arange(seq_len, device=self.inv_freq.device).type_as(self.inv_freq) / self.scale
         freqs = torch.einsum("i,j->ij", t, self.inv_freq)  # (seq_len, d_rope // 2)
@@ -172,7 +173,7 @@ class MLA(nn.Module):
         self.compression_dim = compression_dim
         self.d_head = h_dim // self.n_heads
         self.d_rope = self.d_head // 2  # as chosen in deepseek-v2
-        self.up_proj_dim = (self.d_heads - self.d_rope) * self.n_heads  # for keys and queries
+        self.up_proj_dim = (self.d_head - self.d_rope) * self.n_heads  # for keys and queries
 
         # define all down- and up-projections
         self.W_dkv = nn.Linear(h_dim, self.compression_dim, bias=False)
@@ -182,7 +183,7 @@ class MLA(nn.Module):
         self.W_uq = nn.Linear(self.compression_dim, self.up_proj_dim, bias=False)
 
         # projections to produce decoupled keys and queries
-        self.W_kr = nn.Linear(self.h_dim, self.n_heads * self.d_rope, bias=False)
+        self.W_kr = nn.Linear(h_dim, self.n_heads * self.d_rope, bias=False)
         self.W_qr = nn.Linear(self.compression_dim, self.n_heads * self.d_rope, bias=False)
 
         # RoPE
@@ -193,6 +194,7 @@ class MLA(nn.Module):
 
     def forward(self, x, prev_kv=None):
         # create all down-projection latents
+        # x: (B, S, D)
         batch_size, seq_len, h_dim = x.shape
 
         # compute down-projections
@@ -200,13 +202,13 @@ class MLA(nn.Module):
         c_q = self.W_dq(x)
 
         # compute up_projections
-        q_c = self.W_uq(c_q)
-        k_c = self.W_uk(c_kv)
-        v = self.W_uv(c_kv)
+        q_c = self.W_uq(c_q).view(batch_size, seq_len, self.n_heads, self.d_head - self.d_rope)
+        k_c = self.W_uk(c_kv).view(batch_size, seq_len, self.n_heads, self.d_head - self.d_rope)
+        v = self.W_uv(c_kv).view(batch_size, seq_len, self.n_heads, self.d_head)
 
         # compute decoupled keys and queries
-        k_r = self.W_kr(x)
-        q_r = self.W_qr(q_c)
+        k_r = self.W_kr(x).view(batch_size, seq_len, self.n_heads, self.d_rope)
+        q_r = self.W_qr(c_q).view(batch_size, seq_len, self.n_heads, self.d_rope)
 
         # compute rotary positional embeddings (RoPE)
         k_rope, q_rope = self.RoPE(k_r, q_r)
