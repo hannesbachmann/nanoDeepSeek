@@ -13,7 +13,7 @@ def train():
     n_layers = 2    # number of transformer layers (each contain MLA and MoE)
     n_heads = 2     # number of attention heads
     n_shared = 1    # number of shared experts
-    n_routed = 4   # number of routed experts
+    n_routed = 1    # 5   # number of routed experts
     k = 2   # number of activated routed experts
     epochs = 5000
     batch_size = 32
