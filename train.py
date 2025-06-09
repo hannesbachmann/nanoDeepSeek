@@ -15,11 +15,11 @@ def train():
     n_shared = 1    # number of shared experts
     n_routed = 5   # number of routed experts
     k = 2   # number of activated routed experts
-    epochs = 5000
+    epochs = 2# 5000
     batch_size = 32
     max_seq_len = 32
     grad_clip = 1.0     # maximum norm of the gradients, clip at this value
-    iter_per_epoch = 250
+    iter_per_epoch = 1# 250
     device = "cuda" if torch.cuda.is_available() else "cpu"
     data_dir = 'shakespeare_char'
     train_dir = data_dir + '\\train.bin'
@@ -85,6 +85,13 @@ def train():
     x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
     model.eval()
-    some_result_seq = model.generate(x_test, max_seq_len)
-    print(decode(some_result_seq[0].tolist()))
+    # some_result_seq = model.generate(x_test, max_seq_len)
+    some_result_seq, beams = model.generate_beam(x_test, 128, beam_width=5)
+    print('Beams:')
+    for beam in beams:
+        print(decode(beam[1][0].tolist()))
+        print('-------')
+    print('best result:')
+    print(decode(some_result_seq))
+    # print(decode(some_result_seq[0].tolist()))
     pass

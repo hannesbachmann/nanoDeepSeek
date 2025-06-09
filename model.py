@@ -1,4 +1,5 @@
 import math
+import heapq
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
@@ -50,6 +51,45 @@ class NanoDeepSeek(nn.Module):
             # append sampled index to the running sequence and continue
             x = torch.cat((x, idx_next), dim=1)
         return x
+
+    @torch.no_grad()
+    def generate_beam(self, x, max_new_tokens, beam_width=3):
+        seed_ids = x
+        # Each beam is a tuple: (log_prob, token_ids)
+        beams = [(0.0, seed_ids)]
+        while any(beam[1].size(1) < max_new_tokens for beam in beams):
+            new_beams = []
+            for log_prob, seq in beams:
+                if seq.size(1) >= max_new_tokens:
+                    # stop for this beam
+                    new_beams.append((log_prob, seq))
+                    continue
+
+                seq_input = seq
+                if seq_input.size(1) > self.max_seq_len:
+                    seq_input = seq_input[:, -self.max_seq_len:]
+
+                logits = self.forward(seq_input)
+                next_token_logits = logits[:, -1, :]  # Last token's logits (1, vocab_size)
+
+                probs = torch.softmax(next_token_logits, dim=-1)
+
+                top_probs, top_indices = torch.topk(probs, beam_width, dim=-1)
+
+                top_probs = top_probs.squeeze(0)
+                top_indices = top_indices.squeeze(0)
+
+                for prob, token_id in zip(top_probs, top_indices):
+                    new_seq = torch.cat([seq, token_id.view(1, -1)], dim=-1)
+                    new_log_prob = log_prob + math.log(prob.item())
+                    new_beams.append((new_log_prob, new_seq))
+
+            # Keep top `beam_width` sequences
+            beams = heapq.nlargest(beam_width, new_beams, key=lambda x: x[0])
+
+        # Choose the best final sequence
+        best_seq = max(beams, key=lambda x: x[0])[1][0]
+        return best_seq.tolist(), beams
 
 
 class ExpertBlock(nn.Module):
