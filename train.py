@@ -15,11 +15,11 @@ def train():
     n_shared = 1    # number of shared experts
     n_routed = 10   # number of routed experts
     k = 3   # number of activated routed experts
-    epochs = 100
+    epochs = 2
     batch_size = 64
-    seq_len = 128
+    max_seq_len = 128
     grad_clip = 1.0     # maximum norm of the gradients, clip at this value
-    iter_per_epoch = 1000
+    iter_per_epoch = 2
     device = "cuda" if torch.cuda.is_available() else "cpu"
     data_dir = 'shakespeare_char'
     train_dir = data_dir + '\\train.bin'
@@ -34,7 +34,7 @@ def train():
         n_tokens = meta['vocab_size']
         print(f"found vocab_size = {n_tokens} (inside {meta_path})")
 
-    model = NanoDeepSeek(h_dim, e_dim, compression_dim, n_layers, n_heads, n_tokens, n_shared, n_routed, k)
+    model = NanoDeepSeek(h_dim, e_dim, compression_dim, n_layers, n_heads, n_tokens, max_seq_len, n_shared, n_routed, k)
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.1)
@@ -44,12 +44,30 @@ def train():
         optimizer.zero_grad()
         loss = 0.0
         for i in range(iter_per_epoch):
-            X, y = get_batch(train_dir, batch_size, seq_len, device)
-            with torch.cuda.amp.autocast():
+            X, y = get_batch(train_dir, batch_size, max_seq_len, device)
+            # Note: autocast with device_type='cpu' does not seem to work
+            # Workaround: set device_type='cuda' (even if cuda is not available),
+            # then cuda will be disabled on runtime but autocast still works
+            with torch.amp.autocast(device_type='cuda'):
                 # automatically use float16 and float32 instead of only float32 to improve performance
                 logits = model(X)
-                loss += F.cross_entropy(logits[:, :, -1], y)
-        loss.backward(logits)
+                loss += F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1)
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
         scheduler.step()
+
+    # ---- some test generation ----
+    with open(meta_path, 'rb') as f:
+        meta = pickle.load(f)
+    stoi, itos = meta['stoi'], meta['itos']
+    encode = lambda s: [stoi[c] for c in s]
+    decode = lambda l: ''.join([itos[i] for i in l])
+
+    start = 'First Citizen:'
+    start_ids = encode(start)
+    x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
+
+    some_result_seq = model.generate(x_test, max_seq_len)
+    print(decode(some_result_seq[0].tolist()))
+    pass

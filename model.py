@@ -6,8 +6,9 @@ import torch
 
 
 class NanoDeepSeek(nn.Module):
-    def __init__(self, h_dim, e_dim, compression_dim, n_layers, n_heads, n_tokens, n_shared=1, n_routed=10, k=3):
+    def __init__(self, h_dim, e_dim, compression_dim, n_layers, n_heads, n_tokens, max_seq_len, n_shared=1, n_routed=10, k=3):
         super(NanoDeepSeek, self).__init__()
+        self.max_seq_len = max_seq_len
         self.deepseek_model = nn.ModuleDict(dict(
             token_emb=nn.Embedding(n_tokens, h_dim),
             transformer_blocks=nn.ModuleList(
@@ -26,6 +27,29 @@ class NanoDeepSeek(nn.Module):
         x = self.deepseek_model.norm(x)
 
         return self.deepseek_model.proj_head(x)
+
+    @torch.no_grad()
+    def generate(self, x, gen_seq_len):
+        top_k = 5
+        for t in range(gen_seq_len):
+            # crop input sequence to match max seq_len
+            if x.size(1) > self.max_seq_len:
+                x_input = x[:, -self.max_seq_len:]
+            else:
+                x_input = x
+            logits = self.forward(x_input)
+            last_logits = logits[:, -1, :]
+            # optionally crop the logits to only the top k options
+            if top_k is not None:
+                v, _ = torch.topk(last_logits, min(top_k, last_logits.size(-1)))
+                last_logits[last_logits < v[:, [-1]]] = -float('Inf')
+            # apply softmax to convert logits to (normalized) probabilities
+            probs = F.softmax(last_logits, dim=-1)
+            # sample from the distribution
+            idx_next = torch.multinomial(probs, num_samples=1)
+            # append sampled index to the running sequence and continue
+            x = torch.cat((x, idx_next), dim=1)
+        return x
 
 
 class ExpertBlock(nn.Module):
@@ -58,10 +82,10 @@ class TransformerBlock(nn.Module):
     def forward(self, x, prev_kv=None):
         # can use previous key, value during inference
         # MLA with layer norm and residual connection
-        attn, c_kv = checkpoint(self.attn, self.norm1(x), prev_kv)
+        attn, c_kv = checkpoint(self.attn, self.norm1(x), prev_kv, use_reentrant=True)
         attn = attn + x
         # MoE with layer norm and residual connection
-        moe = checkpoint(self.moe, self.norm2(attn))
+        moe = checkpoint(self.moe, self.norm2(attn), use_reentrant=True)
         moe = moe + x
 
         out = self.dropout(moe)
