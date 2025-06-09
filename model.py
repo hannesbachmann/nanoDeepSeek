@@ -281,12 +281,16 @@ class MLA(nn.Module):
         k = torch.cat([k_c, k_rope], dim=-1)
         q = torch.cat([q_c, q_rope], dim=-1)
 
-        # calculate attention
-        attn_scores = torch.einsum("bqhd, bkhd->bhqk", k, q) / math.sqrt(self.d_head)
-        attn_weights = F.softmax(attn_scores, dim=-1)
-        out = torch.einsum("bhqk,bkhd->bqhd", attn_scores, v)
+        # use fast flash attention
+        out1 = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None,
+                                                                is_causal=True)
+
+        # # calculate attention
+        # attn_scores = torch.einsum("bqhd, bkhd->bhqk", k, q) / math.sqrt(self.d_head)
+        # attn_weights = F.softmax(attn_scores, dim=-1)
+        # out = torch.einsum("bhqk,bkhd->bqhd", attn_scores, v)
 
         # reassemble the heads and project to the dimension of input x
-        output = self.out_proj(out.contiguous().view(batch_size, seq_len, -1))
+        output = self.out_proj(out1.contiguous().view(batch_size, seq_len, -1))
 
         return output, (c_kv, k_rope)

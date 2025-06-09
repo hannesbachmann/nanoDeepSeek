@@ -7,19 +7,19 @@ import pickle
 
 
 def train():
-    h_dim = 64     # model hidden dimension
-    e_dim = 32    # expert hidden dimension (4*h_dim similar to GPT-2 transformer dim)
-    compression_dim = 32    # dimension of the key-value latent compression in MLA
-    n_layers = 2    # number of transformer layers (each contain MLA and MoE)
-    n_heads = 2     # number of attention heads
+    h_dim = 128     # model hidden dimension
+    e_dim = 256    # expert hidden dimension (4*h_dim similar to GPT-2 transformer dim)
+    compression_dim = 64    # dimension of the key-value latent compression in MLA
+    n_layers = 6    # number of transformer layers (each contain MLA and MoE)
+    n_heads = 4     # number of attention heads
     n_shared = 1    # number of shared experts
     n_routed = 5   # number of routed experts
     k = 2   # number of activated routed experts
-    epochs = 2# 5000
+    epochs = 5000
     batch_size = 32
     max_seq_len = 32
     grad_clip = 1.0     # maximum norm of the gradients, clip at this value
-    iter_per_epoch = 1# 250
+    iter_per_epoch = 200
     device = "cuda" if torch.cuda.is_available() else "cpu"
     data_dir = 'shakespeare_char'
     train_dir = data_dir + '\\train.bin'
@@ -57,7 +57,7 @@ def train():
                 loss_acc += (loss / iter_per_epoch)
             # print(f'Batch: {i+1}/{iter_per_epoch}')
             loss.backward()
-            #torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
             #scheduler.step()
         if epoch % 10 == 0:
