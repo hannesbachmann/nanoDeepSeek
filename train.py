@@ -7,19 +7,19 @@ import pickle
 
 
 def train():
-    h_dim = 256     # model hidden dimension
-    e_dim = 1024    # expert hidden dimension (4*h_dim similar to GPT-2 transformer dim)
-    compression_dim = 64    # dimension of the key-value latent compression in MLA
-    n_layers = 4    # number of transformer layers (each contain MLA and MoE)
+    h_dim = 64     # model hidden dimension
+    e_dim = 32    # expert hidden dimension (4*h_dim similar to GPT-2 transformer dim)
+    compression_dim = 32    # dimension of the key-value latent compression in MLA
+    n_layers = 2    # number of transformer layers (each contain MLA and MoE)
     n_heads = 2     # number of attention heads
     n_shared = 1    # number of shared experts
-    n_routed = 10   # number of routed experts
-    k = 3   # number of activated routed experts
-    epochs = 2
-    batch_size = 64
-    max_seq_len = 128
+    n_routed = 5   # number of routed experts
+    k = 2   # number of activated routed experts
+    epochs = 5000
+    batch_size = 32
+    max_seq_len = 32
     grad_clip = 1.0     # maximum norm of the gradients, clip at this value
-    iter_per_epoch = 2
+    iter_per_epoch = 250
     device = "cuda" if torch.cuda.is_available() else "cpu"
     data_dir = 'shakespeare_char'
     train_dir = data_dir + '\\train.bin'
@@ -38,12 +38,14 @@ def train():
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.1)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=3e-4, total_steps=40, pct_start=0.1)
+    #scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=5e-3, total_steps=epochs, pct_start=0.1)
 
     for epoch in range(epochs):
-        optimizer.zero_grad()
-        loss = 0.0
+        model.train()
+
+        loss_acc = 0.0
         for i in range(iter_per_epoch):
+            optimizer.zero_grad()
             X, y = get_batch(train_dir, batch_size, max_seq_len, device)
             # Note: autocast with device_type='cpu' does not seem to work
             # Workaround: set device_type='cuda' (even if cuda is not available),
@@ -51,11 +53,25 @@ def train():
             with torch.amp.autocast(device_type='cuda'):
                 # automatically use float16 and float32 instead of only float32 to improve performance
                 logits = model(X)
-                loss += F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-        optimizer.step()
-        scheduler.step()
+                loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1)
+                loss_acc += (loss / iter_per_epoch)
+            # print(f'Batch: {i+1}/{iter_per_epoch}')
+            loss.backward()
+            #torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
+            #scheduler.step()
+        if epoch % 10 == 0:
+            acc_val_loss = 0.0
+            for i in range(iter_per_epoch):
+                X_val, y_val = get_batch(valid_dir, batch_size, max_seq_len, device)
+                with torch.amp.autocast(device_type='cuda'):
+                    # automatically use float16 and float32 instead of only float32 to improve performance
+                    logits = model(X_val)
+                    val_loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y_val.view(-1), ignore_index=-1)
+                    acc_val_loss += (val_loss / iter_per_epoch)
+            print(f'Epoch: {epoch + 1}/{epochs} \t Train Loss: {loss_acc.item()} \t Val Loss: {acc_val_loss.item()}')
+        else:
+            print(f'Epoch: {epoch+1}/{epochs} \t Loss: {loss_acc.item()}')
 
     # ---- some test generation ----
     with open(meta_path, 'rb') as f:
@@ -68,6 +84,7 @@ def train():
     start_ids = encode(start)
     x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
+    model.eval()
     some_result_seq = model.generate(x_test, max_seq_len)
     print(decode(some_result_seq[0].tolist()))
     pass
