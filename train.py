@@ -7,13 +7,13 @@ import pickle
 
 
 def train():
-    h_dim = 128     # model hidden dimension
-    e_dim = 256    # expert hidden dimension (4*h_dim similar to GPT-2 transformer dim)
-    compression_dim = 64    # dimension of the key-value latent compression in MLA
-    n_layers = 6    # number of transformer layers (each contain MLA and MoE)
-    n_heads = 4     # number of attention heads
+    h_dim = 64     # model hidden dimension
+    e_dim = 64    # expert hidden dimension (4*h_dim similar to GPT-2 transformer dim)
+    compression_dim = 32    # dimension of the key-value latent compression in MLA
+    n_layers = 2    # number of transformer layers (each contain MLA and MoE)
+    n_heads = 2     # number of attention heads
     n_shared = 1    # number of shared experts
-    n_routed = 5   # number of routed experts
+    n_routed = 4   # number of routed experts
     k = 2   # number of activated routed experts
     epochs = 5000
     batch_size = 32
