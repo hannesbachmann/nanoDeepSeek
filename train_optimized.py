@@ -31,8 +31,8 @@ from model import NanoDeepSeek, Config
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
 out_dir = 'out'
-eval_interval = 2000
-log_interval = 1
+eval_interval = 200
+log_interval = 25
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
@@ -42,27 +42,27 @@ wandb_project = 'owt'
 wandb_run_name = 'gpt2' # 'run' + str(time.time())
 # data
 dataset = 'shakespeare_char'
-gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
-batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch size
-block_size = 1024
+gradient_accumulation_steps = 1 # used to simulate larger batch sizes
+batch_size = 128 # if gradient_accumulation_steps > 1, this is the micro-batch size
+block_size = 256
 # model
-n_layer = 12
-n_head = 12
-n_embd = 768
+n_layer = 6
+n_head = 6
+n_embd = 384
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
-learning_rate = 6e-4 # max learning rate
-max_iters = 600000 # total number of training iterations
+learning_rate = 1e-3 # max learning rate
+max_iters = 5000 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
-beta2 = 0.95
+beta2 = 0.99
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
-warmup_iters = 2000 # how many steps to warm up for
-lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
-min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+warmup_iters = 100 # how many steps to warm up for
+lr_decay_iters = 5000 # should be ~= max_iters per Chinchilla
+min_lr = 1e-4 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
@@ -129,7 +129,7 @@ if os.path.exists(meta_path):
 # ----------- model init ------------------------
 model_args = dict(n_layers=n_layer, n_heads=n_head,
                   h_dim=n_embd, max_seq_len=block_size,
-                  n_tokens=None, e_dim=64, compression_dim=32,
+                  n_tokens=None, e_dim=n_embd, compression_dim=384,
                   n_shared=1, n_routed=5, k=2) # start with model_args from command line
 # init a new model from scratch
 print("Initializing a new model from scratch")
@@ -271,3 +271,24 @@ while True:
     # termination conditions
     if iter_num > max_iters:
         break
+
+# ------ some test generation -------
+with open(meta_path, 'rb') as f:
+    meta = pickle.load(f)
+stoi, itos = meta['stoi'], meta['itos']
+encode = lambda s: [stoi[c] for c in s]
+decode = lambda l: ''.join([itos[i] for i in l])
+
+start = 'First Citizen:'
+start_ids = encode(start)
+x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
+
+model.eval()
+# some_result_seq = model.generate(x_test, max_seq_len)
+some_result_seq, beams = model.generate_beam(x_test, 128, beam_width=5)
+print('Beams:')
+for beam in beams:
+    print(decode(beam[1][0].tolist()))
+    print('-------')
+print('best result:')
+print(decode(some_result_seq))
