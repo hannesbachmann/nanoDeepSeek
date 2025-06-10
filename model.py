@@ -58,9 +58,11 @@ class NanoDeepSeek(nn.Module):
     def forward(self, x, y=None):
         # x: (B, S) -> (B, S, D)
         x = self.deepseek_model.token_emb(x)
+        acc_aux_loss = 0.0
 
         for block in self.deepseek_model.transformer_blocks:
             x, c_kv = block(x)
+            acc_aux_loss += block.moe.aux_loss
         x = self.deepseek_model.norm(x)
 
         if y is not None:
@@ -68,7 +70,7 @@ class NanoDeepSeek(nn.Module):
             logits = self.deepseek_model.proj_head(x)
             # calculate loss since target y values are known
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1)
-            return logits, loss
+            return logits, loss + (0.0001 * acc_aux_loss)
         else:
             # onle forward on the last seq_len value for optimization during inference
             return self.deepseek_model.proj_head(x[:, [-1], :]), None
@@ -195,7 +197,7 @@ class ExpertBlock(nn.Module):
         super(ExpertBlock, self).__init__()
         # very small expert (as in deepseek MoE)
         self.h_dim = h_dim
-        self.e_dim = h_dim // 2
+        self.e_dim = e_dim
         self.up = nn.Linear(self.h_dim, self.e_dim, bias=False)
         self.down = nn.Linear(self.e_dim, self.h_dim, bias=False)
 
@@ -248,6 +250,7 @@ class MoE(nn.Module):
         self.n_shared = n_shared
         self.n_routed = n_routed
         self.k = k
+        self.aux_loss = 0.0
         # use only a few (1-2) shared experts and a lot of routed experts
         self.shared_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_shared)])
         self.routed_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_routed)])
@@ -263,6 +266,12 @@ class MoE(nn.Module):
         all_prob = F.softmax(router_out, dim=-1)
         top_k_prob, top_k_idx = torch.topk(all_prob, k=self.k)
 
+        # Expert balance loss
+        expert_counts = torch.zeros(self.n_routed, device=x.device)
+        expert_counts.scatter_add_(0, top_k_idx.view(-1),
+                                   torch.ones_like(top_k_idx.view(-1), dtype=torch.float))
+        self.aux_loss += expert_counts.float().item() * 0.003  # α1 from paper
+
         routed_out = torch.zeros_like(x)
         for k in range(self.k):
             expert_mask = top_k_idx[..., k]
@@ -275,7 +284,7 @@ class MoE(nn.Module):
                     expert_contrib[mask] = expert_out * top_k_prob[..., k][mask].unsqueeze(-1)
 
             routed_out += expert_contrib
-        return shared_out + routed_out + x
+        return shared_out + routed_out
 
 
 class RotaryPositionalEmbedding(nn.Module):
