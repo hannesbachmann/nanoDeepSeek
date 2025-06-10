@@ -7,6 +7,7 @@ from torch.utils.checkpoint import checkpoint
 import torch
 from dataclasses import dataclass
 
+
 @dataclass
 class Config:
     h_dim: int = 64
@@ -70,9 +71,9 @@ class NanoDeepSeek(nn.Module):
             logits = self.deepseek_model.proj_head(x)
             # calculate loss since target y values are known
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1)
-            return logits, loss + (0.0001 * acc_aux_loss)
+            return logits, loss  # + (1e-9 * acc_aux_loss)
         else:
-            # onle forward on the last seq_len value for optimization during inference
+            # only forward on the last seq_len value for optimization during inference
             return self.deepseek_model.proj_head(x[:, [-1], :]), None
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
@@ -270,7 +271,7 @@ class MoE(nn.Module):
         expert_counts = torch.zeros(self.n_routed, device=x.device)
         expert_counts.scatter_add_(0, top_k_idx.view(-1),
                                    torch.ones_like(top_k_idx.view(-1), dtype=torch.float))
-        self.aux_loss += expert_counts.float().item() * 0.003  # α1 from paper
+        self.aux_loss += expert_counts.float().var() * 0.003  # α1 from paper
 
         routed_out = torch.zeros_like(x)
         for k in range(self.k):

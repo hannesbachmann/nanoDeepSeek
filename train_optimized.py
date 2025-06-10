@@ -13,8 +13,8 @@ from model import NanoDeepSeek, Config
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
 out_dir = 'out'
-eval_interval = 200
-log_interval = 25
+eval_interval = 100
+log_interval = 10
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
 always_save_checkpoint = True # if True, always save a checkpoint after each eval
@@ -26,10 +26,10 @@ wandb_run_name = 'gpt2' # 'run' + str(time.time())
 dataset = 'shakespeare_char'
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
 batch_size = 128 # if gradient_accumulation_steps > 1, this is the micro-batch size
-block_size = 256
+block_size = 128
 # model
-n_layer = 6
-n_head = 6
+n_layer = 4
+n_head = 4
 n_embd = 384
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
@@ -111,14 +111,14 @@ if os.path.exists(meta_path):
 # ----------- model init ------------------------
 model_args = dict(n_layers=n_layer, n_heads=n_head,
                   h_dim=n_embd, max_seq_len=block_size,
-                  n_tokens=None, e_dim=n_embd*2, compression_dim=384,
-                  n_shared=1, n_routed=1, k=1) # start with model_args from command line
+                  n_tokens=None, e_dim=n_embd, compression_dim=128,
+                  n_shared=1, n_routed=5, k=4)  # start with model_args from command line
 # init a new model from scratch
 print("Initializing a new model from scratch")
 # determine the vocab size we'll use for from-scratch training
 if meta_vocab_size is None:
     print("! Cant get vocabulary size from meta vocab file")
-model_args['n_tokens'] = meta_vocab_size if meta_vocab_size is not None else 50304
+model_args['n_tokens'] = meta_vocab_size
 ds_config = Config(**model_args)
 model = NanoDeepSeek(ds_config)
 
@@ -274,3 +274,4 @@ for beam in beams:
     print('-------')
 print('best result:')
 print(decode(some_result_seq))
+# print(decode(some_result_seq[0].tolist()))
