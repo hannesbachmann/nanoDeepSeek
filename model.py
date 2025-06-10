@@ -4,10 +4,26 @@ from torch import nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 import torch
+from dataclasses import dataclass
+
+@dataclass
+class Config:
+    h_dim: int = 64
+    e_dim: int = 64
+    compression_dim:int = 32
+    n_layers:int = 2
+    n_heads:int = 2
+    n_tokens:int = 65
+    max_seq_len:int = 32
+    n_shared:int = 1
+    n_routed:int = 5
+    k:int = 2
 
 
 class NanoDeepSeek(nn.Module):
-    def __init__(self, h_dim, e_dim, compression_dim, n_layers, n_heads, n_tokens, max_seq_len, n_shared=1, n_routed=10, k=3):
+    def __init__(self, h_dim, e_dim, compression_dim,
+                 n_layers, n_heads, n_tokens, max_seq_len,
+                 n_shared=1, n_routed=10, k=3):
         super(NanoDeepSeek, self).__init__()
         self.max_seq_len = max_seq_len
         self.deepseek_model = nn.ModuleDict(dict(
