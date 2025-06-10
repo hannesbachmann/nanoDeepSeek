@@ -21,18 +21,19 @@ class Config:
 
 
 class NanoDeepSeek(nn.Module):
-    def __init__(self, h_dim, e_dim, compression_dim,
-                 n_layers, n_heads, n_tokens, max_seq_len,
-                 n_shared=1, n_routed=10, k=3):
+    def __init__(self, model_config):
         super(NanoDeepSeek, self).__init__()
-        self.max_seq_len = max_seq_len
+        self.max_seq_len = model_config.max_seq_len
+        self.config = model_config
         self.deepseek_model = nn.ModuleDict(dict(
-            token_emb=nn.Embedding(n_tokens, h_dim),
+            token_emb=nn.Embedding(model_config.n_tokens, model_config.h_dim),
             transformer_blocks=nn.ModuleList(
-                [TransformerBlock(h_dim, e_dim, n_heads, compression_dim, n_shared, n_routed, k) for _ in
-                 range(n_layers)]),
-            norm=nn.LayerNorm(h_dim),
-            proj_head=nn.Linear(h_dim, n_tokens, bias=False)
+                [TransformerBlock(model_config.h_dim, model_config.e_dim, model_config.n_heads,
+                                  model_config.compression_dim, model_config.n_shared,
+                                  model_config.n_routed, model_config.k) for _ in
+                 range(model_config.n_layers)]),
+            norm=nn.LayerNorm(model_config.h_dim),
+            proj_head=nn.Linear(model_config.h_dim, model_config.n_tokens, bias=False)
         ))
 
     def forward(self, x):
