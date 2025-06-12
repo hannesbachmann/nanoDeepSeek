@@ -1,6 +1,8 @@
 import math
 import heapq
 import inspect
+
+from sympy import false
 from torch import nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
@@ -31,7 +33,7 @@ class NanoDeepSeek(nn.Module):
             token_emb=nn.Embedding(model_config.n_tokens, model_config.h_dim),
             transformer_blocks=nn.ModuleList(
                 [TransformerBlock(model_config.h_dim, model_config.e_dim, model_config.n_heads,
-                                  model_config.compression_dim, model_config.n_shared,
+                                  model_config.compression_dim, self.config.max_seq_len, model_config.n_shared,
                                   model_config.n_routed, model_config.k) for _ in
                  range(model_config.n_layers)]),
             norm=nn.LayerNorm(model_config.h_dim),
@@ -209,13 +211,14 @@ class ExpertBlock(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, h_dim, e_dim, n_heads, compression_dim, n_shared=1, n_routed=10, k=3):
+    def __init__(self, h_dim, e_dim, n_heads, compression_dim, max_seq_len, n_shared=1, n_routed=10, k=3):
         super(TransformerBlock, self).__init__()
         # MLA and deepseek MoE
         self.h_dim = h_dim
         self.e_dim = e_dim
         self.norm1 = nn.LayerNorm(h_dim)
-        self.attn = MLA(h_dim, n_heads, compression_dim)
+        self.attn1 = MLA(h_dim, n_heads, compression_dim)
+        self.attn2 = CausalSelfAttention(h_dim, n_shared, block_size=max_seq_len)
         self.norm2 = nn.LayerNorm(h_dim)
         self.moe = MoE(h_dim, e_dim, n_shared, n_routed, k)
         self.dropout = nn.Dropout(0.2)
@@ -223,10 +226,14 @@ class TransformerBlock(nn.Module):
     def forward(self, x, prev_kv=None):
         # can use previous key, value during inference
         # MLA with layer norm and residual connection
-        attn, c_kv = checkpoint(self.attn, self.norm1(x), prev_kv, use_reentrant=True)
+        # attn, c_kv = self.attn1(self.norm1(x), prev_kv)
+        # attn, c_kv = checkpoint(self.attn, self.norm1(x), prev_kv, use_reentrant=True)
+        attn = self.attn2(self.norm1(x))
+        c_kv = None
         attn = attn + x
         # MoE with layer norm and residual connection
-        moe = checkpoint(self.moe, self.norm2(attn), use_reentrant=True)
+        moe = self.moe(self.norm2(attn))
+        # moe = checkpoint(self.moe, self.norm2(attn), use_reentrant=True)
         moe = moe + x
 
         out = self.dropout(moe)
@@ -402,3 +409,54 @@ class MLA(nn.Module):
         output = self.out_proj(out1.contiguous().view(batch_size, seq_len, -1))
 
         return output, (c_kv, k_rope)
+
+
+class CausalSelfAttention(nn.Module):
+
+    def __init__(self, h_dim, n_heads, block_size):
+        super().__init__()
+        assert h_dim % n_heads == 0
+        """normal attention to compare it with MLA"""
+        # key, query, value projections for all heads, but in a batch
+        self.c_attn = nn.Linear(h_dim, 3 * h_dim, bias=False)
+        # output projection
+        self.c_proj = nn.Linear(h_dim, h_dim, bias=False)
+        # regularization
+        self.attn_dropout = nn.Dropout(0.2)
+        self.resid_dropout = nn.Dropout(0.2)
+        self.n_head = n_heads
+        self.n_embd = h_dim
+        self.dropout = 0.2
+        # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
+        if not self.flash:
+            print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
+            # causal mask to ensure that attention is only applied to the left in the input sequence
+            self.register_buffer("bias", torch.tril(torch.ones(block_size, block_size))
+                                        .view(1, 1, block_size, block_size))
+
+    def forward(self, x):
+        B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
+
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+
+        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+        if self.flash:
+            # efficient attention using Flash Attention CUDA kernels
+            y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, dropout_p=self.dropout if self.training else 0, is_causal=True)
+        else:
+            # manual implementation of attention
+            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+            att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+            att = F.softmax(att, dim=-1)
+            att = self.attn_dropout(att)
+            y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
+
+        # output projection
+        y = self.resid_dropout(self.c_proj(y))
+        return y

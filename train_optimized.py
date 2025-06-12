@@ -112,7 +112,7 @@ if os.path.exists(meta_path):
 model_args = dict(n_layers=n_layer, n_heads=n_head,
                   h_dim=n_embd, max_seq_len=block_size,
                   n_tokens=None, e_dim=n_embd, compression_dim=128,
-                  n_shared=1, n_routed=5, k=4)  # start with model_args from command line
+                  n_shared=1, n_routed=4, k=1)  # start with model_args from command line
 # init a new model from scratch
 print("Initializing a new model from scratch")
 # determine the vocab size we'll use for from-scratch training
