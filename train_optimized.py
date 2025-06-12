@@ -25,11 +25,11 @@ wandb_run_name = 'gpt2' # 'run' + str(time.time())
 # data
 dataset = 'shakespeare_char'
 gradient_accumulation_steps = 1 # used to simulate larger batch sizes
-batch_size = 128 # if gradient_accumulation_steps > 1, this is the micro-batch size
+batch_size = 128  # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 128
 # model
-n_layer = 4
-n_head = 4
+n_layer = 6
+n_head = 6
 n_embd = 384
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
@@ -111,7 +111,7 @@ if os.path.exists(meta_path):
 # ----------- model init ------------------------
 model_args = dict(n_layers=n_layer, n_heads=n_head,
                   h_dim=n_embd, max_seq_len=block_size,
-                  n_tokens=None, e_dim=n_embd, compression_dim=128,
+                  n_tokens=None, e_dim=n_embd * 4, compression_dim=128,
                   n_shared=1, n_routed=4, k=1)  # start with model_args from command line
 # init a new model from scratch
 print("Initializing a new model from scratch")
@@ -267,7 +267,7 @@ x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
 model.eval()
 # some_result_seq = model.generate(x_test, max_seq_len)
-some_result_seq, beams = model.generate_beam(x_test, 128, beam_width=5)
+some_result_seq, beams = model.generate_beam(x_test, 512, beam_width=3)
 print('Beams:')
 for beam in beams:
     print(decode(beam[1][0].tolist()))
