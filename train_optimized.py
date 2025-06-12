@@ -257,9 +257,8 @@ while True:
 # ------ some test generation -------
 with open(meta_path, 'rb') as f:
     meta = pickle.load(f)
-stoi, itos = meta['stoi'], meta['itos']
-encode = lambda s: [stoi[c] for c in s]
-decode = lambda l: ''.join([itos[i] for i in l])
+encode = lambda s: [meta['stoi'][c] for c in s]
+decode = lambda l: ''.join([meta['itos'][i] for i in l])
 
 start = 'First Citizen:'
 start_ids = encode(start)
