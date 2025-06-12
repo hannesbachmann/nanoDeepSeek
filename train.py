@@ -1,4 +1,4 @@
-from model import NanoDeepSeek
+from model import NanoDeepSeek, Config
 from data_loading import get_batch
 import torch
 import torch.nn.functional as F
@@ -34,7 +34,13 @@ def train():
         n_tokens = meta['vocab_size']
         print(f"found vocab_size = {n_tokens} (inside {meta_path})")
 
-    model = NanoDeepSeek(h_dim, e_dim, compression_dim, n_layers, n_heads, n_tokens, max_seq_len, n_shared, n_routed, k)
+    model_args = dict(n_layers=n_layers, n_heads=n_heads,
+                      h_dim=h_dim, max_seq_len=max_seq_len,
+                      n_tokens=None, e_dim=e_dim, compression_dim=128,
+                      n_shared=1, n_routed=4, k=1)  # start with model_args from command line
+    model_args['n_tokens'] = n_tokens
+    ds_config = Config(**model_args)
+    model = NanoDeepSeek(ds_config)
     model = model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.1)
@@ -52,7 +58,7 @@ def train():
             # then cuda will be disabled on runtime but autocast still works
             with torch.amp.autocast(device_type='cuda'):
                 # automatically use float16 and float32 instead of only float32 to improve performance
-                logits = model(X)
+                logits, _ = model(X)
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1)
                 loss_acc += (loss / iter_per_epoch)
             # print(f'Batch: {i+1}/{iter_per_epoch}')
