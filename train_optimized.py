@@ -45,6 +45,7 @@ decay_lr = True # whether to decay the learning rate
 warmup_iters = 100 # how many steps to warm up for
 lr_decay_iters = 5000 # should be ~= max_iters per Chinchilla
 min_lr = 1e-4 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+use_rope = False
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
@@ -112,7 +113,7 @@ if os.path.exists(meta_path):
 model_args = dict(n_layers=n_layer, n_heads=n_head,
                   h_dim=n_embd, max_seq_len=block_size,
                   n_tokens=None, e_dim=n_embd * 4, compression_dim=128,
-                  n_shared=1, n_routed=4, k=1)  # start with model_args from command line
+                  n_shared=1, n_routed=4, k=1, use_rope=use_rope)  # start with model_args from command line
 # init a new model from scratch
 print("Initializing a new model from scratch")
 # determine the vocab size we'll use for from-scratch training
