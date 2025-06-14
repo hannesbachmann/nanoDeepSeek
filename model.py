@@ -223,7 +223,7 @@ class TransformerBlock(nn.Module):
         self.e_dim = e_dim
         self.norm1 = nn.LayerNorm(h_dim)
         # self.attn1 = MLA(h_dim, n_heads, compression_dim)
-        self.attn2 = CausalSelfAttention(h_dim, n_shared, block_size=max_seq_len, use_rope=use_rope)
+        self.attn2 = CausalSelfAttention(h_dim, n_heads=n_heads, block_size=max_seq_len, use_rope=use_rope)
         self.norm2 = nn.LayerNorm(h_dim)
         self.moe = MoE(h_dim, e_dim, n_shared, n_routed, k)
         self.dropout = nn.Dropout(0.2)
@@ -426,7 +426,7 @@ class CausalSelfAttention(nn.Module):
         self.c_attn = nn.Linear(h_dim, 3 * h_dim, bias=False)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.use_rope = use_rope
-        self.RoPE = RotaryPositionalEmbedding(h_dim, device=device)
+        self.RoPE = RotaryPositionalEmbedding(h_dim // n_heads, device=device)
         # output projection
         self.c_proj = nn.Linear(h_dim, h_dim, bias=False)
         # regularization
@@ -449,19 +449,17 @@ class CausalSelfAttention(nn.Module):
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         if self.use_rope:
-            k = k.view(B, T, self.n_head, C // self.n_head)#.transpose(1, 2)  # (B, nh, T, hs)
-            q = q.view(B, T, self.n_head, C // self.n_head)#.transpose(1, 2)  # (B, nh, T, hs)
+            k_r = k.view(B, T, self.n_head, C // self.n_head)#.transpose(1, 2)  # (B, nh, T, hs)
+            q_r = q.view(B, T, self.n_head, C // self.n_head)#.transpose(1, 2)  # (B, nh, T, hs)
             # apply RoPE as rotary positional embedding
-            k_rope, q_rope = self.RoPE(k, q)
+            k_rope, q_rope = self.RoPE(k_r, q_r)
 
-            k = (k + k_rope).transpose(1, 2)
-            q = (q + q_rope).transpose(1, 2)
+            k = (k_r + k_rope).transpose(1, 2)
+            q = (q_r + q_rope).transpose(1, 2)
         else:
             k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
             q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-            v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-
-
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:

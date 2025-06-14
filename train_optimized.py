@@ -45,7 +45,7 @@ decay_lr = True # whether to decay the learning rate
 warmup_iters = 100 # how many steps to warm up for
 lr_decay_iters = 5000 # should be ~= max_iters per Chinchilla
 min_lr = 1e-4 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
-use_rope = False
+use_rope = True
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
@@ -261,7 +261,7 @@ with open(meta_path, 'rb') as f:
 encode = lambda s: [meta['stoi'][c] for c in s]
 decode = lambda l: ''.join([meta['itos'][i] for i in l])
 
-start = 'First Citizen:'
+start = 'If I looked up, I saw scenes which were'
 start_ids = encode(start)
 x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
