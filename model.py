@@ -31,6 +31,7 @@ class NanoDeepSeek(nn.Module):
         self.config = model_config
         self.deepseek_model = nn.ModuleDict(dict(
             token_emb=nn.Embedding(model_config.n_tokens, model_config.h_dim),
+            positional_emb=nn.Embedding(model_config.max_seq_len, model_config.h_dim),
             transformer_blocks=nn.ModuleList(
                 [TransformerBlock(model_config.h_dim, model_config.e_dim, model_config.n_heads,
                                   model_config.compression_dim, self.config.max_seq_len, model_config.n_shared,
@@ -60,7 +61,10 @@ class NanoDeepSeek(nn.Module):
 
     def forward(self, x, y=None):
         # x: (B, S) -> (B, S, D)
-        x = self.deepseek_model.token_emb(x)
+        b, s = x.size()
+        total_pos = torch.arange(0, s, dtype=torch.long, device=x.device)
+        pos_emb = self.deepseek_model.positional_emb(total_pos)
+        x = self.deepseek_model.token_emb(x) + pos_emb
         acc_aux_loss = 0.0
 
         for block in self.deepseek_model.transformer_blocks:
@@ -217,7 +221,7 @@ class TransformerBlock(nn.Module):
         self.h_dim = h_dim
         self.e_dim = e_dim
         self.norm1 = nn.LayerNorm(h_dim)
-        self.attn1 = MLA(h_dim, n_heads, compression_dim)
+        # self.attn1 = MLA(h_dim, n_heads, compression_dim)
         self.attn2 = CausalSelfAttention(h_dim, n_shared, block_size=max_seq_len)
         self.norm2 = nn.LayerNorm(h_dim)
         self.moe = MoE(h_dim, e_dim, n_shared, n_routed, k)
