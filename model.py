@@ -259,7 +259,7 @@ class MoE(nn.Module):
         super(MoE, self).__init__()
         self.h_dim = h_dim
         # self.e_dim = e_dim
-        self.e_dim = h_dim * 4  # GPT2 transformer MLP inspired up-down-projection
+        self.e_dim = e_dim  # GPT2 transformer MLP inspired up-down-projection
         self.n_shared = n_shared
         self.n_routed = n_routed
         self.k = k
