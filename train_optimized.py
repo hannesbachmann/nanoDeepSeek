@@ -31,7 +31,7 @@ block_size = 256
 # model
 n_layer = 6
 n_head = 6
-n_routed = 16
+n_routed = 8
 n_shared = 1
 n_active_experts = 2
 n_embd = 384
@@ -115,7 +115,7 @@ meta_vocab_size = None
 # if os.path.exists(meta_path):
 #     with open(meta_path, 'rb') as f:
 #         meta = pickle.load(f)
-# meta_vocab_size = tokenizer.get_vocab_size()      # meta['vocab_size']
+meta_vocab_size = tokenizer.get_vocab_size()      # meta['vocab_size']
 print(f"found vocab_size = {meta_vocab_size}") # (inside {meta_path})")
 
 # ----------- model init ------------------------
@@ -156,12 +156,12 @@ def estimate_loss():
     for split in ['train', 'val']:
         losses = torch.zeros(eval_iters)
         ppls = torch.zeros(eval_iters)
-        for k in range(eval_iters):
+        for ki in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
                 logits, loss = model(X, Y)
-            losses[k] = loss.item()
-            ppls[k] = torch.exp(loss)
+            losses[ki] = loss.item()
+            ppls[ki] = torch.exp(loss)
         out_loss[split] = losses.mean()
         out_ppl[split] = ppls.mean()
     model.train()
