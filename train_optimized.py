@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 from model import NanoDeepSeek, Config
+from tokenization import load_tokenizer
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -84,6 +85,7 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 # poor man's data loader
 data_dir = dataset
 
+tokenizer = load_tokenizer(data_file_name=data_dir + '\\input')
 
 def get_batch(split):
     # We recreate np.memmap every batch to avoid a memory leak, as per
@@ -108,13 +110,13 @@ iter_num = 0
 best_val_loss = 1e9
 
 # attempt to derive vocab_size from the dataset
-meta_path = os.path.join(data_dir, 'meta.pkl')
+# meta_path = os.path.join(data_dir, 'meta.pkl')
 meta_vocab_size = None
-if os.path.exists(meta_path):
-    with open(meta_path, 'rb') as f:
-        meta = pickle.load(f)
-    meta_vocab_size = meta['vocab_size']
-    print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+# if os.path.exists(meta_path):
+#     with open(meta_path, 'rb') as f:
+#         meta = pickle.load(f)
+# meta_vocab_size = tokenizer.get_vocab_size()      # meta['vocab_size']
+print(f"found vocab_size = {meta_vocab_size}") # (inside {meta_path})")
 
 # ----------- model init ------------------------
 model_args = dict(n_layers=n_layer, n_heads=n_head,
@@ -269,13 +271,13 @@ while True:
         break
 
 # ------ some test generation -------
-with open(meta_path, 'rb') as f:
-    meta = pickle.load(f)
-encode = lambda s: [meta['stoi'][c] for c in s]
-decode = lambda l: ''.join([meta['itos'][i] for i in l])
+#with open(meta_path, 'rb') as f:
+#    meta = pickle.load(f)
+#encode = lambda s: [meta['stoi'][c] for c in s]
+#decode = lambda l: ''.join([meta['itos'][i] for i in l])
 
 start = 'Stan: '
-start_ids = encode(start)
+start_ids = tokenizer.encode(start)
 x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
 model.eval()
@@ -283,8 +285,8 @@ model.eval()
 some_result_seq, beams = model.generate_beam(x_test, 512, beam_width=3)
 # print('Beams:')
 # for beam in beams:
-#     print(decode(beam[1][0].tolist()))
+#     print(tokenizer.decode(beam[1][0].tolist()))
 #     print('-------')
 print('best result:')
-print(decode(some_result_seq))
-# print(decode(some_result_seq[0].tolist()))
+print(tokenizer.decode(some_result_seq))
+# print(tokenizer.decode(some_result_seq[0].tolist()))

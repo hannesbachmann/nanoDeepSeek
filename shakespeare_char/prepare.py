@@ -8,6 +8,7 @@ import os
 import pickle
 import requests
 import numpy as np
+from tokenization import load_tokenizer, learn_tokenizer
 
 # download the tiny shakespeare dataset
 input_file_path = os.path.join(os.path.dirname(__file__), 'input.txt')
@@ -19,6 +20,14 @@ if not os.path.exists(input_file_path):
 with open(input_file_path, 'r', encoding='utf-8') as f:
     data = f.read()
 print(f"length of dataset in characters: {len(data):,}")
+
+# train tokenizer with specified vocabulary size
+learn_tokenizer(data_file_name=input_file_path.replace('.txt', ''), vocab_size=1000)
+tokenizer = load_tokenizer(data_file_name=input_file_path.replace('.txt', ''))
+
+# tokenize dataset
+encoded_data = tokenizer.encode(data)
+print(f"length of encoded data in number of tokens: {len(encoded_data.ids):,}")
 
 # get all the unique characters that occur in this text
 chars = sorted(list(set(data)))
@@ -40,8 +49,8 @@ train_data = data[:int(n*0.9)]
 val_data = data[int(n*0.9):]
 
 # encode both to integers
-train_ids = encode(train_data)
-val_ids = encode(val_data)
+train_ids = tokenizer.encode(train_data).ids
+val_ids = tokenizer.encode(val_data).ids
 print(f"train has {len(train_ids):,} tokens")
 print(f"val has {len(val_ids):,} tokens")
 
