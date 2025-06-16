@@ -22,7 +22,7 @@ with open(input_file_path, 'r', encoding='utf-8') as f:
 print(f"length of dataset in characters: {len(data):,}")
 
 # train tokenizer with specified vocabulary size
-learn_tokenizer(data_file_name=input_file_path.replace('.txt', ''), vocab_size=1000)
+learn_tokenizer(data_file_name=input_file_path.replace('.txt', ''), vocab_size=384)
 tokenizer = load_tokenizer(data_file_name=input_file_path.replace('.txt', ''))
 
 # tokenize dataset

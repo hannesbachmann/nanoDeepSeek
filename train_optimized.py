@@ -34,7 +34,7 @@ n_head = 6
 n_routed = 8
 n_shared = 1
 n_active_experts = 2
-n_embd = 384
+n_embd = 768 # 384
 expert_dim = n_embd * 4 // n_active_experts
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
@@ -111,7 +111,7 @@ best_val_loss = 1e9
 
 # attempt to derive vocab_size from the dataset
 # meta_path = os.path.join(data_dir, 'meta.pkl')
-meta_vocab_size = None
+# meta_vocab_size = None
 # if os.path.exists(meta_path):
 #     with open(meta_path, 'rb') as f:
 #         meta = pickle.load(f)
@@ -276,17 +276,17 @@ while True:
 #encode = lambda s: [meta['stoi'][c] for c in s]
 #decode = lambda l: ''.join([meta['itos'][i] for i in l])
 
-start = 'Stan: '
-start_ids = tokenizer.encode(start)
+start = 'Stan: Eric, what was that sound?'
+start_ids = tokenizer.encode(start).ids
 x_test = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
 model.eval()
-# some_result_seq = model.generate(x_test, 256)
-some_result_seq, beams = model.generate_beam(x_test, 512, beam_width=3)
+some_result_seq = model.generate(x_test, 256)
+# some_result_seq, beams = model.generate_beam(x_test, 512, beam_width=3)
 # print('Beams:')
 # for beam in beams:
 #     print(tokenizer.decode(beam[1][0].tolist()))
 #     print('-------')
 print('best result:')
-print(tokenizer.decode(some_result_seq))
-# print(tokenizer.decode(some_result_seq[0].tolist()))
+# print(tokenizer.decode(some_result_seq))
+print(tokenizer.decode(some_result_seq[0].tolist()))
