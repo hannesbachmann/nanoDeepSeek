@@ -226,6 +226,7 @@ class TransformerBlock(nn.Module):
         self.attn2 = CausalSelfAttention(h_dim, n_heads=n_heads, block_size=max_seq_len, use_rope=use_rope)
         self.norm2 = nn.LayerNorm(h_dim)
         self.moe = MoE(h_dim, e_dim, n_shared, n_routed, k)
+        self.exp_count = None
         self.dropout = nn.Dropout(0.2)
 
     def forward(self, x, prev_kv=None):
@@ -243,6 +244,7 @@ class TransformerBlock(nn.Module):
 
         out = self.dropout(moe)
 
+        self.exp_count = self.moe.expert_distribution_counts
         return out, c_kv
 
 
@@ -264,6 +266,7 @@ class MoE(nn.Module):
         self.n_routed = n_routed
         self.k = k
         self.aux_loss = 0.0
+        self.expert_distribution_counts = torch.zeros(n_routed, device='cuda')
         # use only a few (1-2) shared experts and a lot of routed experts
         self.shared_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_shared)])
         self.routed_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_routed)])
@@ -278,6 +281,10 @@ class MoE(nn.Module):
         router_out = self.router(x)
         all_prob = F.softmax(router_out, dim=-1)
         top_k_prob, top_k_idx = torch.topk(all_prob, k=self.k)
+
+        # get how ofter each expert is routed
+        unique_values, counts = torch.unique(top_k_idx, return_counts=True)
+        self.expert_distribution_counts[unique_values] += (counts / sum(counts))
 
         # Expert balance loss
         expert_counts = torch.zeros(self.n_routed, device=x.device)

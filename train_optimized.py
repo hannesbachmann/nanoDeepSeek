@@ -3,7 +3,7 @@ import time
 import math
 import pickle
 from contextlib import nullcontext
-
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -29,13 +29,13 @@ gradient_accumulation_steps = 1  # used to simulate larger batch sizes
 batch_size = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 256
 # model
-n_layer = 6
+n_layer = 1
 n_head = 6
-n_routed = 8
-n_shared = 1
-n_active_experts = 2
+n_routed = 16
+n_shared = 2
+n_active_experts = 4
 n_embd = 768 # 384
-expert_dim = n_embd * 4 // n_active_experts
+expert_dim = n_embd # * 4 // n_active_experts
 dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # adamw optimizer
@@ -205,8 +205,12 @@ while True:
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
         losses, ppls = estimate_loss()
-        print(
-            f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f} | train perplexity: {ppls['train']:.4f}, val perplexity: {ppls['val']:.4f}")
+        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f} | train perplexity: {ppls['train']:.4f}, val perplexity: {ppls['val']:.4f}")
+        if iter_num % (5*eval_interval) == 0:
+            exp_counts = model.deepseek_model.transformer_blocks[0].moe.expert_distribution_counts
+            to_plot = exp_counts.cpu().detach().numpy()
+            plt.bar(range(16), to_plot)
+            plt.show(block=True)
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
