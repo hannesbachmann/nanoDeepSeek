@@ -226,7 +226,6 @@ class TransformerBlock(nn.Module):
         self.attn2 = CausalSelfAttention(h_dim, n_heads=n_heads, block_size=max_seq_len, use_rope=use_rope)
         self.norm2 = nn.LayerNorm(h_dim)
         self.moe = MoE(h_dim, e_dim, n_shared, n_routed, k)
-        self.exp_count = None
         self.dropout = nn.Dropout(0.2)
 
     def forward(self, x, prev_kv=None):
@@ -243,8 +242,6 @@ class TransformerBlock(nn.Module):
         moe = moe + x
 
         out = self.dropout(moe)
-
-        self.exp_count = self.moe.expert_distribution_counts
         return out, c_kv
 
 
@@ -266,7 +263,6 @@ class MoE(nn.Module):
         self.n_routed = n_routed
         self.k = k
         self.aux_loss = 0.0
-        self.expert_distribution_counts = torch.zeros(n_routed, device='cuda')
         # use only a few (1-2) shared experts and a lot of routed experts
         self.shared_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_shared)])
         self.routed_experts = nn.ModuleList([ExpertBlock(self.h_dim, self.e_dim) for _ in range(n_routed)])
@@ -284,13 +280,15 @@ class MoE(nn.Module):
 
         # get how ofter each expert is routed
         unique_values, counts = torch.unique(top_k_idx, return_counts=True)
-        self.expert_distribution_counts[unique_values] += (counts / sum(counts))
+        expert_distribution_counts = torch.zeros(self.n_routed, device=x.device)
+        expert_distribution_counts[unique_values] += (counts / 1)
+        self.aux_loss = expert_distribution_counts.var()
 
         # Expert balance loss
-        expert_counts = torch.zeros(self.n_routed, device=x.device)
-        expert_counts.scatter_add_(0, top_k_idx.view(-1),
-                                   torch.ones_like(top_k_idx.view(-1), dtype=torch.float))
-        self.aux_loss += expert_counts.float().var() * 0.003  # α1 from paper
+        # expert_counts = torch.zeros(self.n_routed, device=x.device)
+        # expert_counts.scatter_add_(0, top_k_idx.view(-1),
+        #                            torch.ones_like(top_k_idx.view(-1), dtype=torch.float))
+        # self.aux_loss += expert_counts.float().var() * 0.003  # α1 from paper
 
         routed_out = torch.zeros_like(x)
         for k in range(self.k):
