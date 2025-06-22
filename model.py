@@ -1,7 +1,7 @@
 import math
 import heapq
 import inspect
-
+import numpy as np
 from sympy import false
 from torch import nn
 import torch.nn.functional as F
@@ -78,7 +78,7 @@ class NanoDeepSeek(nn.Module):
             logits = self.deepseek_model.proj_head(x)
             # calculate loss since target y values are known
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.view(-1), ignore_index=-1)
-            return logits, loss  # + (1e-9 * acc_aux_loss)
+            return logits, loss  # + (acc_aux_loss / self.config.n_layers)
         else:
             # only forward on the last seq_len value for optimization during inference
             return self.deepseek_model.proj_head(x[:, [-1], :]), None
@@ -270,6 +270,9 @@ class MoE(nn.Module):
         # routing network
         self.router = nn.Linear(self.h_dim, n_routed, bias=False)
 
+        # logging and tracking
+        self.active_experts = None
+
     def forward(self, x):
         # compute output for shared experts (always active)
         shared_out = sum(expert(x) for expert in self.shared_experts)
@@ -282,7 +285,9 @@ class MoE(nn.Module):
         unique_values, counts = torch.unique(top_k_idx, return_counts=True)
         expert_distribution_counts = torch.zeros(self.n_routed, device=x.device)
         expert_distribution_counts[unique_values] += (counts / 1)
-        self.aux_loss = expert_distribution_counts.var()
+        self.aux_loss = expert_distribution_counts.var().cpu().item() * 1e-7
+
+        self.active_experts = top_k_idx
 
         # Expert balance loss
         # expert_counts = torch.zeros(self.n_routed, device=x.device)

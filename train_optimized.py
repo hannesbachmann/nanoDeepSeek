@@ -12,7 +12,7 @@ import threading
 
 from model import NanoDeepSeek, Config
 from tokenization import load_tokenizer
-from visualisation import AnimatedPlot
+from visualisation import AnimatedPlot, AnimatedHeatmap
 
 
 def main_train_loop(gui):
@@ -151,7 +151,6 @@ def main_train_loop(gui):
     optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
     checkpoint = None  # free up memory
 
-
     # helps estimate an arbitrarily accurate loss over either split using many batches
     @torch.no_grad()
     def estimate_loss():
@@ -172,7 +171,6 @@ def main_train_loop(gui):
         model.train()
         return out_loss, out_ppl
 
-
     # learning rate decay scheduler (cosine with warmup)
     def get_lr(it):
         # 1) linear warmup for warmup_iters steps
@@ -186,7 +184,6 @@ def main_train_loop(gui):
         assert 0 <= decay_ratio <= 1
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
         return min_lr + coeff * (learning_rate - min_lr)
-
 
     # logging
     if wandb_log and master_process:
@@ -202,16 +199,17 @@ def main_train_loop(gui):
     running_mfu = -1.0
     aux_loss = []
 
+    inverted_dict = {value: key for key, value in tokenizer.get_vocab().items()}
+    a000 = [inverted_dict[i] for i in range(model_args['n_tokens'])]
+
+    # expert tracking
+    tokens_per_expert = torch.zeros(size=(n_routed, model_args['n_tokens']), dtype=torch.int64, device=device)
+
     while True:
         # determine and set the learning rate for this iteration
         lr = get_lr(iter_num) if decay_lr else learning_rate
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
-
-        exp_counts = model.deepseek_model.transformer_blocks[0].moe.aux_loss            #.cpu().detach().item()
-        aux_loss.append(exp_counts)
-        # to_plot = exp_counts.cpu().detach().numpy()
-        gui.update_plot(aux_loss)
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % eval_interval == 0 and master_process:
@@ -249,6 +247,26 @@ def main_train_loop(gui):
             with ctx:
                 logits, loss = model(X, Y)
                 loss = loss / gradient_accumulation_steps  # scale the loss to account for gradient accumulation
+
+            # live plotting
+            exp_counts = model.deepseek_model.transformer_blocks[0].moe.aux_loss  # .cpu().detach().item()
+            aux_loss.append(exp_counts)
+            # to_plot = exp_counts.cpu().detach().numpy()
+            # gui.update_plot(aux_loss)
+
+            exp_ids = model.deepseek_model.transformer_blocks[0].moe.active_experts
+            if exp_ids is not None:
+                # get the active experts for each token
+                flat_tokens = X.reshape(-1)  # (64*256,)
+                flat_experts = exp_ids.reshape(-1, 4)  # (64*256, 4)
+                expanded_tokens = flat_tokens.unsqueeze(1).expand(-1, 4).reshape(-1)  # (64*256*4,)
+                expanded_experts = flat_experts.reshape(-1)  # (64*256*4,)
+                indices = torch.stack([expanded_experts, expanded_tokens])  # (2, 64*256*4)
+                tokens_per_expert.index_put_((indices[0], indices[1]), torch.ones_like(indices[0]), accumulate=True)
+
+                tpe_np = tokens_per_expert.cpu().detach().numpy()
+                gui.update_plot(tpe_np)
+
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
             X, Y = get_batch('train')
             # backward pass, with gradient scaling if training in fp16
@@ -306,7 +324,8 @@ def main_train_loop(gui):
 
 if __name__ == '__main__':
     root = tk.Tk()
-    gui = AnimatedPlot(root)
+    # gui = AnimatedPlot(root)
+    gui = AnimatedHeatmap(root)
 
     threading.Thread(target=main_train_loop, args=(gui,), daemon=True).start()
 
