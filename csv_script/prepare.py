@@ -21,19 +21,21 @@ with open(input_file_path, 'r', encoding='utf-8') as f:
     data = f.read()
 print(f"length of dataset in characters: {len(data):,}")
 
+# get all the unique characters that occur in this text
+chars = sorted(list(set(data)))
+vocab_size = len(chars)
+print("all the unique characters:", ''.join(chars))
+print(f"vocab size: {vocab_size:,}")
+
 # train tokenizer with specified vocabulary size
-learn_tokenizer(data_file_name=input_file_path.replace('.txt', ''), vocab_size=384)
+learn_tokenizer(data_file_name=input_file_path.replace('.txt', ''), vocab_size=384, init_alphabet=chars)
 tokenizer = load_tokenizer(data_file_name=input_file_path.replace('.txt', ''))
 
 # tokenize dataset
 encoded_data = tokenizer.encode(data)
 print(f"length of encoded data in number of tokens: {len(encoded_data.ids):,}")
 
-# get all the unique characters that occur in this text
-chars = sorted(list(set(data)))
-vocab_size = len(chars)
-print("all the unique characters:", ''.join(chars))
-print(f"vocab size: {vocab_size:,}")
+added = [a for a in list(tokenizer.get_vocab().keys()) if not a in chars]# and len(a) == 1]
 
 # create a mapping from characters to integers
 stoi = { ch:i for i,ch in enumerate(chars) }

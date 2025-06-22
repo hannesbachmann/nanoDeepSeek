@@ -38,10 +38,10 @@ def main_train_loop(gui):
     n_layer = 1
     n_head = 6
     n_routed = 16
-    n_shared = 2
-    n_active_experts = 4
-    n_embd = 768 # 384
-    expert_dim = n_embd # * 4 // n_active_experts
+    n_shared = 1
+    n_active_experts = 1
+    n_embd = 768  # 384
+    expert_dim = n_embd * 4   # // n_active_experts
     dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
     bias = False  # do we use bias inside LayerNorm and Linear layers?
     # adamw optimizer
@@ -201,6 +201,7 @@ def main_train_loop(gui):
 
     inverted_dict = {value: key for key, value in tokenizer.get_vocab().items()}
     a000 = [inverted_dict[i] for i in range(model_args['n_tokens'])]
+    gui.set_labels(a000[-50:], range(n_routed))
 
     # expert tracking
     tokens_per_expert = torch.zeros(size=(n_routed, model_args['n_tokens']), dtype=torch.int64, device=device)
@@ -238,6 +239,8 @@ def main_train_loop(gui):
                     }
                     print(f"saving checkpoint to {out_dir}")
                     torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
+            tokens_per_expert = torch.zeros(size=(n_routed, model_args['n_tokens']), dtype=torch.int64, device=device)
         if iter_num == 0 and eval_only:
             break
 
@@ -258,14 +261,14 @@ def main_train_loop(gui):
             if exp_ids is not None:
                 # get the active experts for each token
                 flat_tokens = X.reshape(-1)  # (64*256,)
-                flat_experts = exp_ids.reshape(-1, 4)  # (64*256, 4)
-                expanded_tokens = flat_tokens.unsqueeze(1).expand(-1, 4).reshape(-1)  # (64*256*4,)
+                flat_experts = exp_ids.reshape(-1, n_active_experts)  # (64*256, 4)
+                expanded_tokens = flat_tokens.unsqueeze(1).expand(-1, n_active_experts).reshape(-1)  # (64*256*4,)
                 expanded_experts = flat_experts.reshape(-1)  # (64*256*4,)
                 indices = torch.stack([expanded_experts, expanded_tokens])  # (2, 64*256*4)
                 tokens_per_expert.index_put_((indices[0], indices[1]), torch.ones_like(indices[0]), accumulate=True)
 
                 tpe_np = tokens_per_expert.cpu().detach().numpy()
-                gui.update_plot(tpe_np)
+                gui.update_plot(tpe_np[:, -50:])
 
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
             X, Y = get_batch('train')

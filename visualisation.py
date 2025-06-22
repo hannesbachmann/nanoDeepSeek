@@ -39,7 +39,7 @@ class AnimatedHeatmap:
         self.root.title("Animated Plot")
 
         self.fig, self.ax = plt.subplots()
-        self.values = np.zeros((16, 384))
+        self.values = np.zeros((16, 50))
         self.map = self.ax.imshow(self.values, cmap='viridis')
         self.cbar = self.ax.figure.colorbar(self.map, ax=self.ax)
         self.ax.set_aspect('auto')
@@ -53,11 +53,15 @@ class AnimatedHeatmap:
 
     def set_labels(self, x_ticks, y_ticks):
         self.ax.set_xticks(range(len(x_ticks)), labels=x_ticks,
-                           rotation=45, ha="right", rotation_mode="anchor")
+                           rotation=90, ha="right", rotation_mode="anchor")
         self.ax.set_yticks(range(len(y_ticks)), labels=y_ticks)
 
     def update_plot(self, values):
-        self.values = values
+        col_min = values.min(axis=1, keepdims=True)
+        col_max = values.max(axis=1, keepdims=True)
+        denom = col_max - col_min
+        denom[denom == 0] = 1
+        self.values = (values - col_min) / denom
 
         self.map.set_array(self.values)
         self.map.set_clim(vmin=np.min(self.values), vmax=np.max(self.values))
