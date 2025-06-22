@@ -28,20 +28,20 @@ def main_train_loop(gui):
     # wandb logging
     wandb_log = False  # disabled by default
     wandb_project = 'owt'
-    wandb_run_name = 'gpt2'  # 'run' + str(time.time())
+    wandb_run_name = 'nano_deepseek'  # 'run' + str(time.time())
     # data
     dataset = 'csv_script'
     gradient_accumulation_steps = 1  # used to simulate larger batch sizes
     batch_size = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
     block_size = 256
     # model
-    n_layer = 1
+    n_layer = 6
     n_head = 6
     n_routed = 16
     n_shared = 1
-    n_active_experts = 1
+    n_active_experts = 4
     n_embd = 768  # 384
-    expert_dim = n_embd * 4   # // n_active_experts
+    expert_dim = n_embd   # // n_active_experts
     dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
     bias = False  # do we use bias inside LayerNorm and Linear layers?
     # adamw optimizer

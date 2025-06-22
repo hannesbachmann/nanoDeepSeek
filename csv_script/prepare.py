@@ -35,7 +35,7 @@ tokenizer = load_tokenizer(data_file_name=input_file_path.replace('.txt', ''))
 encoded_data = tokenizer.encode(data)
 print(f"length of encoded data in number of tokens: {len(encoded_data.ids):,}")
 
-added = [a for a in list(tokenizer.get_vocab().keys()) if not a in chars]# and len(a) == 1]
+added = [a for a in list(tokenizer.get_vocab().keys()) if not a in chars and len(a) == 1]
 
 # create a mapping from characters to integers
 stoi = { ch:i for i,ch in enumerate(chars) }

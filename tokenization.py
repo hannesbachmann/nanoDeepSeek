@@ -9,7 +9,7 @@ def learn_tokenizer(data_file_name, vocab_size=100000, min_frequency=2, init_alp
 
     # init tokenizer model
     tokenizer = Tokenizer(models.BPE())
-    tokenizer.pre_tokenizer = Whitespace()  # pre_tokenizers.ByteLevel(add_prefix_space=True)
+    tokenizer.pre_tokenizer = pre_tokenizers.BertPreTokenizer()
     tokenizer.decoder = decoders.ByteLevel()
     # tokenizer.post_processor = processors.ByteLevel(trim_offsets=True)
 
