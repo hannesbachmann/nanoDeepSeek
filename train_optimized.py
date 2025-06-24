@@ -258,14 +258,18 @@ def main_train_loop(gui):
             # gui.update_plot(aux_loss)
 
             exp_ids = model.deepseek_model.transformer_blocks[0].moe.active_experts
+            exp_inf = model.deepseek_model.transformer_blocks[0].moe.active_influence
             if exp_ids is not None:
                 # get the active experts for each token
                 flat_tokens = X.reshape(-1)  # (64*256,)
-                flat_experts = exp_ids.reshape(-1, n_active_experts)  # (64*256, 4)
-                expanded_tokens = flat_tokens.unsqueeze(1).expand(-1, n_active_experts).reshape(-1)  # (64*256*4,)
-                expanded_experts = flat_experts.reshape(-1)  # (64*256*4,)
-                indices = torch.stack([expanded_experts, expanded_tokens])  # (2, 64*256*4)
-                tokens_per_expert.index_put_((indices[0], indices[1]), torch.ones_like(indices[0]), accumulate=True)
+                flat_experts = exp_ids.reshape(-1, n_active_experts)  # (64*256, n_active_experts)
+                flat_inf = exp_inf.reshape(-1, n_active_experts)    # (64*256, n_active_experts)
+                expanded_tokens = flat_tokens.unsqueeze(1).expand(-1, n_active_experts).reshape(-1)  # (64*256*n_active_experts,)
+                expanded_experts = flat_experts.reshape(-1)  # (64*256*n_active_experts,)
+                expanded_influences = flat_inf.reshape(-1)
+                indices = torch.stack([expanded_experts, expanded_tokens])  # (2, 64*256*n_active_experts)
+                # tokens_per_expert.index_put_((indices[0], indices[1]), torch.ones_like(indices[0]), accumulate=True)
+                tokens_per_expert.index_put_((indices[0], indices[1]), expanded_influences, accumulate=True)
 
                 tpe_np = tokens_per_expert.cpu().detach().numpy()
                 gui.update_plot(tpe_np[:, -50:])

@@ -272,6 +272,7 @@ class MoE(nn.Module):
 
         # logging and tracking
         self.active_experts = None
+        self.active_influence = None
 
     def forward(self, x):
         # compute output for shared experts (always active)
@@ -288,6 +289,7 @@ class MoE(nn.Module):
         self.aux_loss = expert_distribution_counts.var().cpu().item() * 1e-7
 
         self.active_experts = top_k_idx
+        self.active_influence = top_k_prob
 
         # Expert balance loss
         # expert_counts = torch.zeros(self.n_routed, device=x.device)
