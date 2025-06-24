@@ -35,7 +35,7 @@ def main_train_loop(gui):
     batch_size = 64  # if gradient_accumulation_steps > 1, this is the micro-batch size
     block_size = 256
     # model
-    n_layer = 6
+    n_layer = 1
     n_head = 6
     n_routed = 16
     n_shared = 1
@@ -201,10 +201,10 @@ def main_train_loop(gui):
 
     inverted_dict = {value: key for key, value in tokenizer.get_vocab().items()}
     a000 = [inverted_dict[i] for i in range(model_args['n_tokens'])]
-    gui.set_labels(a000[-50:], range(n_routed))
+    gui.set_labels(a000, range(n_routed))
 
     # expert tracking
-    tokens_per_expert = torch.zeros(size=(n_routed, model_args['n_tokens']), dtype=torch.int64, device=device)
+    tokens_per_expert = torch.zeros(size=(n_routed, model_args['n_tokens']), dtype=torch.float32, device=device)
 
     while True:
         # determine and set the learning rate for this iteration
@@ -240,7 +240,7 @@ def main_train_loop(gui):
                     print(f"saving checkpoint to {out_dir}")
                     torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
 
-            tokens_per_expert = torch.zeros(size=(n_routed, model_args['n_tokens']), dtype=torch.int64, device=device)
+            tokens_per_expert = torch.zeros(size=(n_routed, model_args['n_tokens']), dtype=torch.float32, device=device)
         if iter_num == 0 and eval_only:
             break
 
@@ -258,7 +258,7 @@ def main_train_loop(gui):
             # gui.update_plot(aux_loss)
 
             exp_ids = model.deepseek_model.transformer_blocks[0].moe.active_experts
-            exp_inf = model.deepseek_model.transformer_blocks[0].moe.active_influence
+            exp_inf = model.deepseek_model.transformer_blocks[0].moe.active_influence.detach()
             if exp_ids is not None:
                 # get the active experts for each token
                 flat_tokens = X.reshape(-1)  # (64*256,)
@@ -272,7 +272,7 @@ def main_train_loop(gui):
                 tokens_per_expert.index_put_((indices[0], indices[1]), expanded_influences, accumulate=True)
 
                 tpe_np = tokens_per_expert.cpu().detach().numpy()
-                gui.update_plot(tpe_np[:, -50:])
+                gui.update_plot(tpe_np[:, :])
 
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
             X, Y = get_batch('train')

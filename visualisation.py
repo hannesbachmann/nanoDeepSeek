@@ -39,7 +39,7 @@ class AnimatedHeatmap:
         self.root.title("Animated Plot")
 
         self.fig, self.ax = plt.subplots()
-        self.values = np.zeros((16, 50))
+        self.values = np.zeros((16, 384))
         self.map = self.ax.imshow(self.values, cmap='viridis')
         self.cbar = self.ax.figure.colorbar(self.map, ax=self.ax)
         self.ax.set_aspect('auto')
@@ -62,6 +62,7 @@ class AnimatedHeatmap:
         denom = col_max - col_min
         denom[denom == 0] = 1
         self.values = (values - col_min) / denom
+        # self.values = values
 
         self.map.set_array(self.values)
         self.map.set_clim(vmin=np.min(self.values), vmax=np.max(self.values))
